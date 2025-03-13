@@ -1,35 +1,6 @@
 # bank_transaction_fraud_detation
 
 
-이 문서는 **IEEE-CIS Fraud Detection** 형태의 데이터를 사용하여, **XGBoost**로 사기 거래 여부(`isFraud`)를 예측하는 파이프라인을 간단히 보여줍니다. 
-
-
-- **주요 흐름**  
-  1) **Train / Test 데이터 불러오기**  
-  2) **컬럼명 전처리**  
-  3) **Train 병합, Test 병합**  
-  4) **타깃 분리 (`isFraud`)**  
-  5) **결측치 처리, 라벨 인코딩**  
-  6) **Train / Validation 분할**  
-  7) **XGBoost 모델 학습 + 검증** (혼동행렬, 정밀도/재현율)  
-  8) **전체 데이터로 재학습 후 제출 파일 생성**  
-
-
-아래 내용은 `bank_transaction_fraud_detaction_v5.ipynb` 라는 예시 코드 파일을 중심으로 작성되었습니다.
-
----
-
-## 파일 구조
-
-```plaintext
-.
-├── train_transaction.csv
-├── train_identity.csv
-├── test_transaction.csv
-├── test_identity.csv
-├── sample_submission.csv
-
-```
 
 
 
@@ -39,148 +10,6 @@
 
 
 
-
-## Feedback(1등 수상자의 글을 읽고 깨달은 점)
-
-**거래(Fraud) 예측이 아니라 “클라이언트(신용카드) 사기 여부”**를 예측하는 문제
-
-
-한 번 사기가 발생한 카드(credit card)는 그 뒤로 모든 거래(isFraud=1)로 처리된다고 함.
-
-
-즉, 사실상 “해당 카드를 가진 사용자”가 사기인지 아닌지 판단하는 문제에 가깝다는 것.
-
-
-데이터가 시계열(Time Series)로 보이지만, 실제론 ‘새로운 클라이언트’를 예측해야 하는 성격
-
-
-Public LB와 Private LB 사이 차이가 큰 이유 중 하나가, Private 셋에 처음 등장하는(Train에 없던) 고객이 많기 때문(약 68.2%).
-
-
-즉, Train과 Public Test 일부는 같은 클라이언트가 존재할 수 있지만, Private Test에는 새로운 클라이언트가 대거 포함.
-
-
-**UID(Unique Identifier)**를 통해 클라이언트를 식별하고, 그 그룹 단위로 특징을 집계(Aggregate)하는 방식
-
-
-예: card1, addr1, 그리고 D1n(거래 시작 날짜 기반 파생)을 합쳐서 임의의 uid를 만든 뒤, uid별로 다양한 컬럼을 평균, 표준편차, nunique 등으로 묶어서 모델 입력 특성으로 활용.
-
-
-이렇게 하면 모델이 “Train에서 본 적 없는 uid(신규 카드)”라도, 집계 특징을 통해 사기 여부를 일반화해서 판단할 수 있게 됨.
-
-
-각종 전처리, Feature Selection, EDA, Validation 전략을 총동원
-
-
-430+ 컬럼(V 컬럼만 339개)을 다루기 위해 PCA, 상관관계 제거, permutation importance, adversarial validation, time consistency check 등을 수행.
-
-
-최종적으로 CatBoost, LGBM, XGB 모델을 각각 만들고, 앙상블(+Stacking)로 LB 성능을 높임.
-
-
-
-- 주요 내용 세부 요약
-
-
-1) 시간(Time)이 아닌 새로운 클라이언트가 관건
-
-
-데이터가 TransactionDT 등 시간축을 가지지만, 실제 중요한 건 “Train과 Test가 다른 클라이언트를 많이 포함”한다는 점.
-
-
-Train에서 본 클라이언트(카드)와 Test에 새로 등장한 클라이언트(카드)를 잘 구분해야 하고, 새로 등장한 클라이언트에 대해 일반화 능력을 갖춰야 높은 Private LB 점수를 얻음.
-
-
-2) 사기 거래 = 사기 클라이언트
-
-
-사기 발생 후 그 카드의 모든 거래가 isFraud=1.
-
-
-실제로 Train 데이터에서 대부분의 카드는 ‘모두 0’이거나 ‘모두 1’인 형태(0.2%만 0,1 섞여 있음).
-
-
-결국 “어느 신용카드가 사기인지”를 예측하는 문제와 유사.
-
-
-3) UID (Unique ID) 발상
-
-
-card1, addr1, 그리고 D1n(실제 거래 날짜 day - D1값) 등 특정 컬럼을 조합해 하나의 “uid”를 만들면, 해당 uid는 같은 신용카드를 의미할 가능성이 높음.
-
-
-주의: Train에 없었던 uid가 Test에 나오면, 바로 “새로운 카드”가 됨. 그래서 uid 자체를 모델에 직접 피처로 넣는 건 위험(과적합 가능, 68.2%는 Train에 없는 uid).
-
-
-대신 uid 그룹별 집계(aggregate) 통계량(mean, std, nunique 등)을 모델에 제공 → 모델이 “이 uid가 가진 거래 패턴”을 학습 가능.
-
-
-4) 모델링 & 피처 엔지니어링
-
-
-CatBoost, LGBM, XGB 등 여러 트리 모델 사용
-
-
-서로 다른 구현체/피처 엔지니어링 → 앙상블 시 성능이 상승.
-
-
-NN(Neural Network)도 시도했지만 최종 제출에선 제외(리더보드 상승폭이 작았다고 함).
-
-
-V 컬럼(339개) 처리:
-NAN 구조나 상관관계 묶음으로 그룹화 → PCA / Averaging / Subset 등으로 축소.
-
-
-어떤 V 블록은 시간에 따라 패턴이 달라(“time consistency” 깨짐) 제거.
-
-
-Feature Selection 기법 총동원
-
-
-Forward selection, Permutation importance, Adversarial validation, Correlation, Time consistency, Client consistency, train/test distribution 등.
-
-
-“Time consistency” = 초반 데이터로 학습해 뒤쪽 (미래) 데이터 예측 → AUC가 급격히 떨어지는 피처는 미래 일반화에 불리하므로 제거.
-
-
-클라이언트 식별Adversarial validation(Train vs Test 분류)을 통해 어떤 컬럼들이 client 식별에 중요한지 점검 → card1, addr1, C13, D1, D4, dist1, TransactionAmt 등이 중요하게 나타남.
-
-
-이를 활용해 UID + Aggregation 파생 피처 생성.
-
-
-5) Validation 전략
-
-   
-한 가지 방식만 믿지 않고, 여러 가지 시도:
-첫 4개월 Train, 마지막 1개월 Test
-
-
-2개월 Train, 2개월 건너뛰고 2개월 Test 등 시계열 validation
-
-
-LB 자체도 하나의 validation 간주
-
-
-GroupKFold by month
-
-
-“Seen vs. Unseen client” separately 평가(UID로 분류).
-
-
-모델 간 앙상블로 “이미 본 클라이언트 예측”과 “새 클라이언트 예측”을 모두 보완.
-
-
-6) 최종 앙상블 & Post Processing
-
-
-CatBoost (0.9639/0.9408), LGBM (0.9617/0.9384), XGB (0.9602/0.9324) Public/Private LB 성능을 각각 보임.
-
-
-최종 제출 시에는 동등 가중 평균 or 스택 모델 → Private LB를 약간 더 개선.
-
-
-Post Processing(“PP”): 같은 uid(같은 카드) 내 예측값을 평균/고정(“모든 거래가 동일 확률”) 처리 → LB 소폭 상승(약 +0.001).
 
 
 # IEEE-CIS Fraud Detection 프로젝트
@@ -252,56 +81,6 @@ RandomForest + XGBoost + Logistic Regression  |
 - **랜덤 포레스트, XGBoost 같은 트리 기반 모델이 금융권에서도 검증된 방법**
 - 약 600개 파라미터를 가진 딥러닝 모델을 구현해 보았지만, 모든 데이터를 정상 거래 데이터로 판단함.
 
-### 딥러닝 구현 코드
-
-```python
-class ANNModel(nn.Module):
-    def __init__(self, input_size=225):
-        super(ANNModel, self).__init__()
-        self.layer = nn.Sequential(
-            nn.Linear(input_size, 500),
-            nn.ReLU(),
-            nn.Linear(500, 200),
-            nn.ReLU(),
-            nn.Linear(200, 100),
-            nn.ReLU(),
-            nn.Linear(100, 20),
-            nn.ReLU(),
-            nn.Linear(20, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        x = self.layer(x)
-        return x
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = ANNModel().to(device)
-model.train()
-criterion = nn.BCELoss().to(device)
-optimizer = optim.Adam(model.parameters(), lr=0.1)
-
-for epoch in range(100):
-    cost = 0.0
-
-    for x, y in train_loader:
-        x = x.to(device)
-        y = y.to(device)
-
-        output = model(x)
-        loss = criterion(output, y.unsqueeze(1))
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        cost += loss
-
-    cost = cost / len(train_loader)
-
-    if (epoch + 1) % 10 == 0:
-        print(f"Epoch : {epoch+1:4d}, Model : {list(model.parameters())}, Cost : {cost:.3f}")
-```
 
 테스트 데이터로 평가 결과 (혼동 행렬):
 
@@ -351,150 +130,6 @@ for epoch in range(100):
 
 ![image.png](attachment:2e0aa346-c61e-45b1-bab4-70eebb958e97:image.png)
 
-- **XGBoost 코드**
-    
-    ```python
-    import gc
-    import numpy as np
-    import pandas as pd
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import LabelEncoder
-    from sklearn.metrics import confusion_matrix, classification_report
-    from sklearn.metrics import precision_recall_curve
-    import xgboost as xgb
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    #############################
-    # 1) 데이터 불러오기
-    #############################
-    train_transaction = pd.read_csv('/content/train_transaction.csv', index_col='TransactionID')
-    train_identity    = pd.read_csv('/content/train_identity.csv',    index_col='TransactionID')
-    test_transaction  = pd.read_csv('/content/test_transaction.csv',  index_col='TransactionID')
-    test_identity     = pd.read_csv('/content/test_identity.csv',     index_col='TransactionID')
-    sample_submission = pd.read_csv('/content/sample_submission.csv', index_col='TransactionID')
-    print("train_transaction:", train_transaction.shape)
-    print("train_identity:", train_identity.shape)
-    print("test_transaction:", test_transaction.shape)
-    print("test_identity:", test_identity.shape)
-    #############################
-    # 2) 컬럼명 치환 ( '-' → '_' )
-    #############################
-    train_transaction.columns = [c.replace('-', '_') for c in train_transaction.columns]
-    train_identity.columns    = [c.replace('-', '_') for c in train_identity.columns]
-    test_transaction.columns  = [c.replace('-', '_') for c in test_transaction.columns]
-    test_identity.columns     = [c.replace('-', '_') for c in test_identity.columns]
-    #############################
-    # 3) Train 병합, Test 병합
-    #############################
-    train = train_transaction.merge(train_identity, how='left', left_index=True, right_index=True)
-    test  = test_transaction.merge(test_identity,   how='left', left_index=True, right_index=True)
-    del train_transaction, train_identity, test_transaction, test_identity
-    gc.collect()
-    print("Train shape (merged):", train.shape)
-    print("Test  shape (merged):", test.shape)
-    #############################
-    # 4) 타깃 분리
-    #############################
-    y_all = train['isFraud'].copy()
-    X_all = train.drop('isFraud', axis=1)
-    # 테스트 세트
-    X_test = test.copy()
-    del train, test
-    gc.collect()
-    #############################
-    # 5) 간단한 결측치 처리
-    #############################
-    X_all  = X_all.fillna(-999)
-    X_test = X_test.fillna(-999)
-    #############################
-    # 6) 라벨 인코딩
-    #############################
-    for col in X_all.columns:
-        if X_all[col].dtype == 'object' or X_test[col].dtype == 'object':
-            le = LabelEncoder()
-            le.fit(list(X_all[col].values) + list(X_test[col].values))
-            X_all[col]  = le.transform(X_all[col].values)
-            X_test[col] = le.transform(X_test[col].values)
-    print("X_all shape:", X_all.shape)
-    print("X_test shape:", X_test.shape)
-    print("y_all shape:", y_all.shape)
-    #############################
-    # 7) Train/Validation 분할
-    #############################
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_all, y_all,
-        test_size=0.2,
-        random_state=42,
-        stratify=y_all
-    )
-    print("X_train:", X_train.shape, "X_val:", X_val.shape)
-    #############################
-    # 8) 모델 학습 (검증 지표 확인용)
-    #############################
-    clf = xgb.XGBClassifier(
-        n_estimators=250,
-        max_depth=9,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.4,
-        missing=-999,
-        random_state=42,
-        # XGBoost 2.0+에서 GPU 사용 시
-        tree_method='hist',
-        device='cuda'
-    )
-    clf.fit(X_train, y_train)
-    #############################
-    # 9) 검증 세트 예측 → 혼동행렬, 정밀도/재현율, PR 커브
-    #############################
-    # (1) 0/1 예측
-    y_val_pred = clf.predict(X_val)
-    # (2) 혼동행렬
-    cm = confusion_matrix(y_val, y_val_pred)
-    print("\n=== Confusion Matrix ===")
-    print(cm)
-    plt.figure(figsize=(5,4))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-    plt.title("Confusion Matrix (Validation)")
-    plt.xlabel("Predicted Label")
-    plt.ylabel("True Label")
-    plt.show()
-    # (3) 정밀도/재현율 리포트
-    print("\n=== Classification Report ===")
-    print(classification_report(y_val, y_val_pred, digits=4))
-    # (4) Precision-Recall Curve (검증 세트 확률 예측 사용)
-    y_val_proba = clf.predict_proba(X_val)[:, 1]  # 사기(1) 확률
-    precision, recall, thresholds = precision_recall_curve(y_val, y_val_proba)
-    plt.figure(figsize=(6,5))
-    plt.plot(recall, precision, color='darkorange', lw=2)
-    plt.title("Precision-Recall Curve (Validation)")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.grid(True)
-    plt.show()
-    #############################
-    # 10) 최종 전체 학습 & 제출 파일 생성
-    #############################
-    # (선택) 만약 검증 점수가 괜찮다면, 전체 데이터를 사용해 재학습
-    final_model = xgb.XGBClassifier(
-        n_estimators=250,
-        max_depth=9,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.4,
-        missing=-999,
-        random_state=42,
-        tree_method='hist',
-        device='cuda'
-    )
-    final_model.fit(X_all, y_all)
-    # 테스트 세트 예측
-    y_test_proba = final_model.predict_proba(X_test)[:, 1]
-    sample_submission['isFraud'] = y_test_proba
-    sample_submission.to_csv('simple_xgboost_plt.csv')
-    print("Done! Submission file saved: simple_xgboost_plt.csv")
-    ```
-    
 
 ### 2. **XGBoost + Logistic Regression Stacking + Optuna + K-Fold (5-Fold) 적용**
 
@@ -555,3 +190,96 @@ for epoch in range(100):
     
     - `y_val_pred_logreg = log_reg.predict(X_val_meta)`
     - `confusion_matrix(y_val, y_val_pred_logreg)`을 사용하여 검증 데이터의 성능을 평가
+ 
+
+
+### 📊 모델 비교
+
+- **XGBoost 단일 모델**은 정확도(98.1%)가 높지만 **Recall(51.2%)이 낮음**, 즉 사기 거래를 놓치는 비율이 높음
+- **XGBoost + Logistic Regression Stacking** 모델은 **Recall(66%)으로 개선**, 사기 거래 탐지 성능 향상
+- **F1-score가 증가**하면서 Precision-Recall 균형 유지
+- 최종적으로 **XGBoost + Logistic Regression Stacking + K-Fold + Optuna 모델을 선정**하여 금융 사기 탐지에 활용
+
+# **🛠️ 트러블슈팅 & 해결 전략**
+
+### **💡 모델 학습 시 발생할 수 있는 문제 & 해결 방법 (Troubleshooting)**
+
+---
+
+## **🚨 1. 데이터 불균형 문제 (Imbalanced Data)**
+
+🔹 **문제점:**
+
+- 사기 거래(3%) vs 정상 거래(97%) → **데이터 불균형 심각**
+- Accuracy(정확도)만 보면 95%로 높아 보이지만, 실제 사기 거래 탐지율이 낮음
+- 모델이 "사기 거래는 거의 없다"라고 (모든 데이터를 정상 거래로 판별) 단순 예측해도 높은 Accuracy를 기록할 수 있음
+
+🔹 **해결 방법:**
+
+✅ **데이터 샘플링 기법 활용**
+
+- **오버샘플링(Over-sampling):** SMOTE 같은 기법으로 사기 거래 데이터를 증강
+- Scikit-learn `class_weight='balanced'` 옵션 사용
+    - **SMOTE + 하이퍼파라미터 튜닝 실제 적용했을 때 … (랜덤포레스트 모델)**
+        - **📌 🔍 하이퍼파라미터 튜닝 + SMOTE 적용 후 주요 변화**
+            
+            ✅ **사기 거래 탐지 성능(Recall) 증가** (**0.41 → 0.60, +19% 향상!**)
+            
+            ✅ **Precision(정밀도) 감소** (**0.95 → 0.48, -47% 하락**)
+            
+            ✅ **전체 정확도는 98% → 96%로 약간 감소했지만, 더 많은 사기 거래를 탐지할 수 있게 됨**
+            
+            ✅ **F1-score는 전체적으로 비슷한 수준 유지 (Fraud 데이터: 0.57 → 0.53)**
+            
+- XGBoost, LightGBM 등 **불균형 데이터에 강한 트리 기반 모델 사용**
+    - 실제 성능이 제일 좋았던 모델은 **XGBoost**
+
+---
+
+## **⚡ 2. 모델을 앙상블하거나 튜닝할수록 성능이 떨어짐**
+
+🔹 **문제점:**
+
+- 트리 개수를 늘리거나 XGBoost/랜덤 포레스트를 튜닝할수록 성능 저하 발생
+- 과적합(overfitting)으로 인해 새로운 데이터에서 예측 성능이 떨어짐
+- 너무 복잡한 모델을 만들면 **과적합 + 해석 가능성 감소**
+
+🔹 **해결 방법:**
+
+✅ **적절한 하이퍼파라미터 튜닝 (Hyperparameter Tuning)**
+
+- **랜덤 포레스트:** `max_depth`, `min_samples_split`, `n_estimators` 조정
+- **XGBoost:** `learning_rate` 감소, `max_depth` 조정, `subsample` 사용
+✅ **피처 선택 (Feature Selection) 적용**
+- K-Fold Cross-Validation으로 모델의 **일반화 성능 평가**
+✅ **앙상블 기법 최적화**
+
+---
+
+## **📉 3. Precision과 Recall 균형 맞추기 어려움**
+
+🔹 **문제점:**
+
+- Precision을 높이면 Recall이 낮아지고, Recall을 높이면 Precision이 낮아지는 **Trade-off 발생**
+- 금융 사기 탐지에서는 **Recall이 낮으면 실제 사기 거래를 놓치는 문제 발생**
+- Precision이 낮으면 **정상 거래를 사기로 잘못 분류하여 고객 불편 증가**
+
+---
+
+## **🆕 4. 시간(Time)이 아닌 새로운 클라이언트가 관건**
+
+🔹 **문제점:**
+
+- Train과 Test 데이터에 포함된 **클라이언트(카드)가 다름**
+- Train에서 학습한 패턴이 Test에 그대로 적용되지 않음
+- 새로운 클라이언트의 사기 여부를 예측해야 하므로 **일반화 성능이 중요**
+
+---
+
+## **🆕 5. 사기 거래 = 사기 클라이언트**
+
+🔹 **문제점:**
+
+- Train 데이터에서 대부분의 카드가 **"모두 정상(0)"이거나 "모두 사기(1)"**
+- 즉, 특정 카드에서 사기가 발생하면 해당 카드의 모든 거래가 사기라고 판단됨
+- 결국, 개별 거래보다는 **"이 카드가 사기 카드인지 아닌지"** 예측하는 문제가 됨
