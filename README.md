@@ -15,7 +15,7 @@
   8) **전체 데이터로 재학습 후 제출 파일 생성**  
 
 
-아래 내용은 `bank_transaction_fraud_detaction_v4` 라는 예시 코드 파일을 중심으로 작성되었습니다.
+아래 내용은 `bank_transaction_fraud_detaction_v5.ipynb` 라는 예시 코드 파일을 중심으로 작성되었습니다.
 
 ---
 
