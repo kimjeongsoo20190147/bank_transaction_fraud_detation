@@ -1,17 +1,6 @@
 # bank_transaction_fraud_detation
 
 
-
-
-
-![image](https://github.com/user-attachments/assets/85beee6e-3c0d-45a2-b360-e6d1a6051199)
-![image](https://github.com/user-attachments/assets/12919f8e-ae0c-4f19-9eb5-271f96554f5f)
-![image](https://github.com/user-attachments/assets/0c179545-5255-4bca-bc19-ed13ee2c2605)
-
-
-
-
-
 # IEEE-CIS Fraud Detection 프로젝트
 
 ## ✨ 프로젝트 개요
@@ -283,3 +272,10 @@ RandomForest + XGBoost + Logistic Regression  |
 - Train 데이터에서 대부분의 카드가 **"모두 정상(0)"이거나 "모두 사기(1)"**
 - 즉, 특정 카드에서 사기가 발생하면 해당 카드의 모든 거래가 사기라고 판단됨
 - 결국, 개별 거래보다는 **"이 카드가 사기 카드인지 아닌지"** 예측하는 문제가 됨
+
+
+
+
+![image](https://github.com/user-attachments/assets/85beee6e-3c0d-45a2-b360-e6d1a6051199)
+![image](https://github.com/user-attachments/assets/12919f8e-ae0c-4f19-9eb5-271f96554f5f)
+![image](https://github.com/user-attachments/assets/0c179545-5255-4bca-bc19-ed13ee2c2605)
